@@ -23,6 +23,17 @@ CREATE TABLE IF NOT EXISTS cash_lines (
   note TEXT,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cash_pickups (
+  id INTEGER PRIMARY KEY,
+  pickup_no TEXT NOT NULL UNIQUE,
+  business_day TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  amount REAL NOT NULL,
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  note TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cash_pickups_day ON cash_pickups(business_day);
 CREATE TABLE IF NOT EXISTS close_batches (
   id INTEGER PRIMARY KEY,
   batch_no TEXT NOT NULL UNIQUE,
@@ -33,7 +44,11 @@ CREATE TABLE IF NOT EXISTS close_batches (
   line_count INTEGER NOT NULL,
   status TEXT NOT NULL,
   sealed_at TEXT NOT NULL,
-  note TEXT
+  note TEXT,
+  cash_total REAL NOT NULL DEFAULT 0,
+  pickup_count INTEGER NOT NULL DEFAULT 0,
+  pickup_total REAL NOT NULL DEFAULT 0,
+  expected_cash REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS variance_rows (
   id INTEGER PRIMARY KEY,
@@ -56,10 +71,33 @@ CREATE TABLE IF NOT EXISTS reopen_requests (
 '''
 
 
+def _migrate(conn) -> None:
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(close_batches)").fetchall()}
+    added = False
+    for name, ddl in (
+        ("cash_total", "ALTER TABLE close_batches ADD COLUMN cash_total REAL NOT NULL DEFAULT 0"),
+        ("pickup_count", "ALTER TABLE close_batches ADD COLUMN pickup_count INTEGER NOT NULL DEFAULT 0"),
+        ("pickup_total", "ALTER TABLE close_batches ADD COLUMN pickup_total REAL NOT NULL DEFAULT 0"),
+        ("expected_cash", "ALTER TABLE close_batches ADD COLUMN expected_cash REAL NOT NULL DEFAULT 0"),
+    ):
+        if name not in cols:
+            conn.execute(ddl)
+            added = True
+    if added:
+        # 旧批次没有解款概念：期待额即原系统合计，解款笔数/合计为 0。
+        conn.execute(
+            '''UPDATE close_batches
+               SET cash_total=system_total, expected_cash=system_total,
+                   pickup_count=0, pickup_total=0
+               WHERE cash_total=0 AND expected_cash=0 AND pickup_total=0'''
+        )
+
+
 def seed_if_empty() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         n = conn.execute("SELECT COUNT(*) c FROM tills").fetchone()["c"]
         if n:
             return

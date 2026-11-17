@@ -7,8 +7,9 @@ const route = useRoute()
 const stations = [
   { to: '/', no: '01', label: '总览', hint: '今日钉扎' },
   { to: '/lines', no: '02', label: '流水', hint: '收银入账' },
-  { to: '/close', no: '03', label: '封账', hint: '日结锁定' },
-  { to: '/variance', no: '04', label: '长短款', hint: '差额处置' },
+  { to: '/pickups', no: '03', label: '解款', hint: '中途押运' },
+  { to: '/close', no: '04', label: '封账', hint: '日结锁定' },
+  { to: '/variance', no: '05', label: '长短款', hint: '差额处置' },
 ]
 
 function active(to) {

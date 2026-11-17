@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import PROJECT_NAME
 from app.seed import seed_if_empty
-from app.routers import dashboard, tills, lines, close, settings
+from app.routers import dashboard, tills, lines, pickups, close, settings
 
 seed_if_empty()
 
@@ -17,5 +17,6 @@ app.add_middleware(
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(tills.router, prefix="/api")
 app.include_router(lines.router, prefix="/api")
+app.include_router(pickups.router, prefix="/api")
 app.include_router(close.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")

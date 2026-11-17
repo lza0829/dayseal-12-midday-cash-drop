@@ -5,7 +5,9 @@ from fastapi import HTTPException
 from app.db import connect
 from app.repositories import closes as close_repo
 from app.repositories import lines as line_repo
+from app.repositories import pickups as pickup_repo
 from app.repositories import settings as settings_repo
+from app.services import cash_rollup
 
 
 def _now() -> str:
@@ -16,13 +18,12 @@ def preview(business_day: str | None = None) -> dict[str, Any]:
     conn = connect()
     try:
         day = business_day or settings_repo.get(conn, "business_day") or ""
-        total, count = line_repo.day_total(conn, day)
+        summary = cash_rollup.day_summary(conn, day)
         return {
-            "business_day": day,
-            "system_total": total,
-            "line_count": count,
+            **summary,
             "sealed": close_repo.is_sealed(conn, day),
             "lines": line_repo.list_lines(conn, day),
+            "pickups": pickup_repo.list_pickups(conn, day),
         }
     finally:
         conn.close()
@@ -37,20 +38,26 @@ def seal(body: dict[str, Any]) -> dict[str, Any]:
         if close_repo.is_sealed(conn, day):
             raise HTTPException(409, f"营业日 {day} 已封账")
         declared = float(body["declared_cash"])
-        total, count = line_repo.day_total(conn, day)
-        variance = round(declared - total, 2)
+        # 期待实盘与预览同源：现金流水合计 − 已确认解款合计。
+        summary = cash_rollup.day_summary(conn, day)
+        expected = summary["expected_cash"]
+        variance = round(declared - expected, 2)
         sealed_at = _now()
         batch_id = close_repo.create_batch(
             conn,
             batch_no=close_repo.next_batch_no(conn),
             business_day=day,
-            system_total=total,
+            system_total=expected,
             declared_cash=declared,
             variance=variance,
-            line_count=count,
+            line_count=summary["line_count"],
             status="sealed",
             sealed_at=sealed_at,
             note=body.get("note"),
+            cash_total=summary["cash_total"],
+            pickup_count=summary["pickup_count"],
+            pickup_total=summary["pickup_total"],
+            expected_cash=expected,
         )
         disposition = "pending" if abs(variance) > 1e-9 else "balanced"
         close_repo.add_variance(
@@ -65,10 +72,14 @@ def seal(body: dict[str, Any]) -> dict[str, Any]:
         return {
             "batch_id": batch_id,
             "business_day": day,
-            "system_total": total,
+            "system_total": expected,
+            "cash_total": summary["cash_total"],
+            "pickup_count": summary["pickup_count"],
+            "pickup_total": summary["pickup_total"],
+            "expected_cash": expected,
             "declared_cash": declared,
             "variance": variance,
-            "line_count": count,
+            "line_count": summary["line_count"],
             "status": "sealed",
             "disposition": disposition,
         }
